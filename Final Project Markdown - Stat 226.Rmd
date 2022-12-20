@@ -1,0 +1,361 @@
+---
+title: "Final Project 226"
+author: "Drew Grier"
+date: "2022-12-09"
+output: pdf_document
+zotero: "My Library"
+link-citations: true
+bibliography: references.bib
+---
+
+# Final Project for Stat Computing with R
+
+```{r load librariers, echo = FAlSE, include=FALSE}
+library(tidyverse)
+library(dplyr)
+library(readr)
+library(stringr)
+library(httr)
+library(xml2)
+library(rvest)
+library(LearnBayes)
+library(ggplot2)
+library(nnet)
+```
+
+## Introduction
+
+Recently, talks during the Sabermetric Conference held in March of each year, has been focused around pitcher fatigue effects. Baseball is a wildly different sport in its modern version than say even 20 years ago. In the 1990s pitchers were still throwing an average of 7 innings with many of them throwing more than one complete game. Greg Maddux was a dominant force in the 90s and lead the league three times in complete games with 8 in 1993, 10 in a strike shortened 1994, and 10 again in 1995 when the Braves went on to win it all. This past season (2022) we only saw four pitchers with more than one complete game of which Aaron Nola and Nathan Eovaldi only had 2, Framber Valdez with 3, and leading the way 2022 NL Cy Young Winner Sandy Alcantara with 6. There were only a total of 27 pitchers that managed to go all nine innings at least once.[@2022Pitching]
+
+What is causing this "death of the complete game?" Increasingly we're seeing the rise of the effectiveness of bullpens attribute to the decline of starting pitchers depth, but there's also another larger factor that is at play in the minds of managers. In Game 6 of the 2020 World Series, Manager Kevin Cash, pulled his starting pitcher, Blake Snell, only halfway through the sixth inning. He had been dominant, allowing only two hits while striking out nine batters in only 73 pitches. Ultimately, the Rays went on to lose the game and in succession the entire World Series. Cash justified this action to the reporters after the game saying that he "didn't want Mookie or Seager seeing Blake a third time."[@kevinca]
+
+Cash's game altering decision was backed by what he believed was the third *Time Through Order Penalty (TTOP*). This phenomenon is not "new" per say, but has recently been popularized by Mitchel Lichtman in his 2013 article on Baseball Prospectus.[@Lichtman] Before Lichtman popularized the idea, it had been already somewhat been proven in research by Tom Tango [@tango2007] that there is numerical evidence to support their idea. The book quantifies the corresponding drop-off in a pitcher performance as increases in *weighted on-base average (wOBA)*. They observed that the average wOBA of a plate appearance in the first time through the order (1TTO) is about 9 wOBA points less than that in the second (2TTO). As for the third, the average wOBA of a plate appearance in the second TTO is about 8 wOBA points less than that in the third (3TTO).
+
+TTOP is widely accepted in the baseball community and is routinely cited by announcers when they feel a pitcher is becoming less effective the longer he goes through a game. Many managers even use it as validation for pulling a starter during the middle of the third TTO or right before. Brad Ausmus, who managed the Tigers from 2014 to 2017 is quoted, "the more times a hitter sees a pitcher, the more success that hitter is going to have."[@fangraphsblog]
+
+## Statistical Questions
+
+-   Do starting pitchers in MLB generally perform worse when they face batters for the 2nd and 3rd times?
+
+-   What type of variation do we see among pitchers in these TTO effects?
+
+-   Instead of pitcher fatigue (which is almost impossible to model), is more about batter familiarity?
+
+## Outline
+
+First, we will look at one season (2022) to get a general sense of the TTOP. We will look at basic exploratory statistics into the TTO effects of the first appearance then analyze how sequential TTO affects a pitcher and finally we can look how the pitchers during the 2022 season based on their TTO effects.
+
+For further in depth analysis of these TTO effects, I will test for batter familiarity through the use of a Bayesian mixed effects model. The model will predict the outcome of each plate appearance as a function of the batter sequence number, batter quality, pitcher quality, handedness match, and home field advantage.
+
+## Data
+
+Data will be pulled through functions using Retrosheet. This way we can look at specific teams, seasons, and players, rather than downloading an entire file that I would have to sort and filter through to find the specific variables and players I want to look at.
+
+For each plate appearance for data between 1990 and 2022, I record the outcome, the event wOBA, the handedness match between the batter and pitcher, and whether the batter is at home.
+
+As for mathematical notations, there are $K = 7$ possible outcomes of a plate appearance: out, unintentional walk (uBB), hit by pitch (HBP), single (1B), double (2B), triple (3B), and home run (HR). For each $i = 1,…, n,$ let $y$ be the categorical variable indicating the outcome of the $i^{th}$ plate appearance.
+
+$$
+y_{i} \in {1,2,...,7} = {Out, uBB, HBP, 1B, 2B, 3B, HR}
+$$
+
+The batter sequence number $t \in {1,…,27}$ , records how many batters the pitcher has faced up to and including that plate appearance. The 2TTO and 3TTO indicator can be defined as, $1 (10 \le t \le 18)$ and $1(19 \le t \le 27)$. The *hand* variable is indicated in binary form as 1 when the batter and pitcher have matching handedness and 0 when they don't. The *home* variable is also indicated similarly, 1 for home, and 0 when they are not.
+
+Covariate symbol and description
+
+$y_{i}$ - the outcome of the $i^{th}$ plate appearance $\in {1,…,K = 7}$
+
+$t_{i}$ - the batter sequence number $\in {1,…,27}$
+
+$1 (10 \le t \le 18)$ - binary variable indicating whether the pitcher is in his 2TTO
+
+$1(19 \le t \le 27)$ - binary variable indicating whether the pitcher is in his 3TTO
+
+$x^{(b)}_{i}$ - running average of batter quality
+
+$x^{(p)}_{i}$ - running average of pitcher quality
+
+$hand_{i}$ - binary variable indicating matching handedness
+
+$home_{i}$ - binary variable indicating home or not
+
+$x_{i}$ - $\mathbf{x_{i}} = \langle logit(x^{(b)}_{i}), logit(x^{(p)}_{i}), hand_{i}, home_{i}\rangle$
+
+## Exploratory Analysis
+
+Before we do some in depth analysis, we should first explore the trends for pitching in an MLB season. For this we'll look at the 2021 season and look to see the number of batters that pitchers faced in 2021. Since our analysis is based around time through the order, we can add vertical lines indicating the number of times the batters have batted around. The lines are placed at 9, 18, and 27 which correspond to 1, 2, and 3 complete times through the order.
+
+What's interesting about this histogram is that its basically a skewed normal distribution. If our theory was true that pitchers are continuously pulled before the 3TTO then it would make sense to see a sort of Weibull distribution where most of the data is congregated slightly left of center. What we can see in this histogram is that most pitchers are making it right to that 3TTO cutoff. They get through about 5 innings to 5.2 innings of work before they're pulled. We see a sharp decline in pitchers facing more than three times through the order and that makes sense because in the 2021 season only 39 pitchers with a complete game.
+
+```{r utility functions, echo = FALSE, include=TRUE}
+## Some functions that will be used
+
+increasefont <- function(){
+  theme(text = element_text(size = 18))
+}
+
+centertile <- function(){
+  theme(plot.title = element_text(color = "purple", size = 18,
+                                  hjust = .5, vjust = .8, angle = 0))
+}
+
+bar1 <- function(y, ...){
+  TH <- theme(plot.title = element_text(color = "purple", size = 18,
+                                        hjust = .5, vjust = .8, angle = 0))
+  Y1 <- NULL
+  p1 <- ggplot(data.frame(Y1 = y), aes(Y1)) +
+    geom_bar(width = .5, fill = "lightpink1") +
+    ylab("Frequency")
+  if (narges() == 2)
+    p1 <- p1 + ggtitle(...) + TH
+  p1
+}
+
+retro_final_PA_2010_2021d <- retro_final_PA_2010.2021d 
+retro_final_PA_2010_2021c <- retro_final_PA_2010.2021c
+retro_base_states_2010_2021c <- retro_base_states_2010.2021c
+```
+
+```{r exploratory analysis, echo = FALSE, include = TRUE}
+## This function estimates hitter quality
+
+estimate_batting <- function(retro_final_PA_2010_2021d,
+                             season,
+                             s_woba = 0.5){
+  require(dplyr)
+  require(LearnBayes)
+  retro_final_PA_2010_2021d %>% 
+    filter(YEAR == season) -> retroseason
+  retroseason %>% 
+    group_by(BAT_ID) %>% 
+    summarize(PA = n(),
+              wOBA = mean(EVENT_WOBA)) -> S
+  d <- cbind(S$wOBA, s_woba ^ 2 / S$PA)
+  fit <- laplace(normnormexch, c(0, 0), d)
+  mu <- fit$mode[1]
+  tau <- exp(fit$mode[2])
+  S$estimate <- (d[, 1] / d[, 2] + mu / tau ^ 2) /
+    (1 / d[, 2] + 1 / tau ^ 2)
+  S %>% 
+    mutate(Season = season,
+           Batter = estimate) %>% 
+    select(Season, BAT_ID, PA, wOBA, Batter)
+}
+```
+
+```{r pitcher fit, echo = FALSE, include = TRUE}
+## Pitcher multimodel fitting
+
+pitcher_fit <- function(pit_info,
+                        retro_final_PA_2010_2021d,
+                        Estimates,
+                        batter_value = 0.3){
+  require(dplyr)
+  require(nnet)
+  require(LearnBayes)
+  require(ggplot2)
+  
+  # get retrosheet data for the one pitcher
+  pit_id <- pit_info$PIT_ID
+  retro_data <- filter(retro_final_PA_2010_2021d,
+                       PIT_ID == pit_id,
+                       PA_IND == "TRUE")
+  
+  # merge the batter wOBA estimates
+  inner_join(retro_data,
+             Estimates,
+             by = c("YEAR" = "Season",
+                    "BAT_ID" = "BAT_ID")) ->
+    retro_data
+  
+  # define the batting event variable
+  retro_data %>% 
+    filter(EVENT_CODE %in% c("HP", "other", "W")) %>% 
+    mutate(Event = ifelse(EVENT_CODE == "HP", "HBP",
+                   ifelse(EVENT_CODE == "W", "uBB",
+                   ifelse(HIT_VAL == 1, "1B",
+                   ifelse(HIT_VAL == 2, "2B",
+                   ifelse(HIT_VAL == 3, "3B",
+                   ifelse(HIT_VAL == 4, "HR",
+                        "Out"))))))) ->
+    retro_data
+  
+  # convert event variable to a factor and
+  # make "Out" the reference category
+  retro_data$Event <- as.factor(retro_data$Event)
+  retro_data$Event2 <- relevel(retro_data$Event, 
+                           ref = "Out")
+  
+  # multinomial model fit
+  fit <- nnet::multinom(Event2 ~ BATTER_SEQ_NUM + Batter, 
+                  data = retro_data)
+  # extract parameter estimates and associated 
+  # var-cov matrix
+  alpha <- c(t(coef(fit)))
+  v <- vcov(fit)
+  # simulate 1000 draws from approximate posterior
+  r_alpha <- rmnorm(1000, alpha, v)
+  
+  # function to convert par estimates to probabilities
+  convert_to_probs <- function(alpha){
+    c(1,  exp(alpha)) / (1 + sum(exp(alpha)))
+  }
+ 
+ # for each value of BATTER_SEQ_NUM (1-30) and fixed value
+ # of batter woba, obtain simulated draws of 
+ # expected wOBA
+ r_woba <- NULL
+ for(b in 1:30){
+    pred <- c(1, b, batter_value)
+    r_lin_pred <- cbind(r_alpha[, 1:3] %*% pred,
+                     r_alpha[, 4:6] %*% pred,
+                     r_alpha[, 7:9] %*% pred,
+                     r_alpha[, 10:12] %*% pred,
+                     r_alpha[, 13:15] %*% pred,
+                     r_alpha[, 16:18] %*% pred)
+     probs <- t(apply(r_lin_pred, 1, convert_to_probs))
+     woba_weights <- c(0, 0.89, 1.27, 1.62, 0.72, 
+                     2.10, 0.69)
+     r_woba <- rbind(r_woba,
+                  data.frame(BATTER_SEQ_NUM = b,
+                  wOBA = probs %*% woba_weights))
+ }
+ 
+ r_woba %>% 
+   mutate(PIT_NAME = pit_info$PIT_NAME) -> r_woba
+ 
+ # summarize trend of (BATTER_SEQ_NUM, E(wOBA))
+ slope <- coef(lm(wOBA ~ BATTER_SEQ_NUM,
+             data = r_woba))[2]
+
+ list(slope = slope, r_woba = r_woba)
+}
+```
+
+```{r plot many woba, echo = FALSE, include = TRUE}
+plot_many_woba <- function(r_woba){
+  require(ggplot2)
+  ggplot(r_woba, 
+       aes(BATTER_SEQ_NUM, wOBA)) +
+    geom_jitter(size = 0.2) +
+    geom_smooth(method = "gam",
+              color = "red") +
+    ggtitle("Expected wOBA Against Batter Number") +
+    ylab("Expected wOBA") +
+    theme(text=element_text(size=18)) +
+    theme(plot.title = element_text(colour = "blue", size = 18,
+                   hjust = 0.5, vjust = 0.8, angle = 0)) +
+    facet_wrap(~ PIT_NAME)
+}
+```
+
+```{r plot woba, echo = FALSE, include = TRUE}
+plot_woba <- function(r_woba){
+  require(ggplot2)
+  ggplot(r_woba, 
+       aes(BATTER_SEQ_NUM, wOBA)) +
+    geom_jitter(size = 0.2) +
+    geom_smooth(method = "gam",
+              color = "red") +
+    ggtitle(r_woba$PIT_NAME[1]) +
+    ylab("Expected wOBA") +
+    theme(text=element_text(size=18)) +
+    theme(plot.title = element_text(colour = "blue", size = 18,
+                   hjust = 0.5, vjust = 0.8, angle = 0))
+}
+```
+
+```{r multinorm modeling, echo =FALSE, include = TRUE}
+# compute wOBA batter estimates for all seasons
+Estimates <- NULL
+for(Season in 2010:2021){
+  S <- estimate_batting(retro_final_PA_2010_2021d,
+                        season = Season,
+                        s_woba = 0.5)
+  Estimates <- rbind(Estimates, S)
+}
+
+# find number of batters faced and mean wOBA for 
+# all pitchers
+retro_final_PA_2010_2021d %>% 
+  group_by(PIT_ID) %>% 
+  summarize(BFP = n(),
+            WOBA = mean(EVENT_WOBA)) -> S 
+
+# only consider pitchers who faced at least 
+# 5000 hitters
+inner_join(retro_final_PA_2010_2021d,
+           S, by = "PIT_ID") %>% 
+  filter(BFP >= 5000) -> retro_5000
+
+# data frame contains id and name for these "5000"
+# pitchers
+pitchers_5000 <- select(retro_5000,
+                        PIT_ID, PIT_NAME) %>% 
+  unique()
+
+# illustrate calculations for single pitcher
+out <- pitcher_fit(pitchers_5000[1, ],
+            retro_final_PA_2010_2021d,
+            Estimates,
+            batter_value = 0.3)
+plot_woba(out$r_woba)
+
+# several pitchers
+
+out1 <- pitcher_fit(pitchers_5000[37, ],
+                   retro_final_PA_2010_2021d,
+                   Estimates,
+                   batter_value = 0.3)
+out2 <- pitcher_fit(pitchers_5000[15, ],
+                   retro_final_PA_2010_2021d,
+                   Estimates,
+                   batter_value = 0.3)
+out3 <- pitcher_fit(pitchers_5000[18, ],
+                    retro_final_PA_2010_2021d,
+                    Estimates,
+                    batter_value = 0.3)
+out4 <- pitcher_fit(pitchers_5000[27, ],
+                    retro_final_PA_2010_2021d,
+                    Estimates,
+                    batter_value = 0.3)
+out5 <- pitcher_fit(pitchers_5000[45, ],
+                    retro_final_PA_2010_2021d,
+                    Estimates,
+                    batter_value = 0.3)
+out6 <- pitcher_fit(pitchers_5000[58, ],
+                    retro_final_PA_2010_2021d,
+                    Estimates,
+                    batter_value = 0.3)
+
+plot_many_woba(rbind(out1$r_woba,
+                     out2$r_woba,
+                     out3$r_woba,
+                     out4$r_woba,
+                     out5$r_woba,
+                     out6$r_woba))
+
+# collect slopes for all pitchers
+one_fit <- function(j){
+  pitcher_fit(pitchers_5000[j, ],
+              retro_final_PA_2010_2021d,
+              Estimates,
+              batter_value = 0.3)$slope
+}
+
+# add slopes to data frame of pitchers
+slopes <- sapply(1:126, one_fit)
+pitchers_5000$slope <- slopes
+
+ggplot(pitchers_5000,
+       aes(slope)) +
+  geom_histogram(fill = "tan",
+                 color = "blue",
+                 bins = 15) +
+ggtitle("Histogram of Slopes for 126 Pitchers") +
+theme(text=element_text(size=18)) +
+  theme(plot.title = element_text(colour = "blue", size = 18,
+                                  hjust = 0.5, vjust = 0.8, angle = 0)) 
+```
+
+
